@@ -1,0 +1,172 @@
+📝 **Project Scoping Document — Projectmaven ↔ Upwork Chrome Extension**
+*Version 1.6 • 2025‑07‑02 (UTC‑8)*
+
+---
+
+### 1. 📝 Executive Summary
+
+Freelancers on Upwork often copy‑paste job details into external tools to estimate cost and duration—slowing their ability to bid competitively. The Projectmaven Chrome extension eliminates that friction by embedding a **“Quick Estimate”** action directly within every Upwork job post. One click scrapes the job data, invokes Projectmaven’s Cost‑Estimate API, and returns an instant cost, timeline, and optional SOW—tailored to the freelancer’s own hourly rate.
+
+Because the Upwork integration is a **Pro‑tier benefit**, the extension also acts as a conversion lever: Starter users can see the button but are prompted to upgrade when they attempt to scope an Upwork job. All subscription management continues on the main Projectmaven site, keeping billing secure and centralised.
+
+### 2. 🎯 Goals & Success Metrics 🎯 Goals & Success Metrics
+
+| KPI                                               | Target (90 days post‑launch)         | Business Outcome                |
+| ------------------------------------------------- | ------------------------------------ | ------------------------------- |
+| Extension Daily Active Users (DAU, Pro)           | **300**                              | Stickiness within paying cohort |
+| Pro‑tier conversion uplift                        | **+15 %** vs. pre‑extension baseline | Subscription revenue            |
+| Job posts with an estimate run ÷ job posts viewed | **≥ 25 %**                           | Feature adoption                |
+| SOWs generated ÷ estimates run                    | **≥ 10 %**                           | Depth of engagement             |
+| Avg. time from job open → proposal send           | **‑40 %**                            | User productivity               |
+
+### 3. 👤 Target Users & Use‑Cases
+
+#### Personas
+
+* **Maya (Freelancer, Upwork Top‑Rated, Pro tier)** — wants faster, personalised, data‑driven bids.
+* **Leo (New user on Starter tier)** — validates scope via dashboard; upsells to Pro for Upwork integration.
+
+#### Representative User Stories (revised)
+
+| #        | User Story                                                                                                                                                                                                    | Acceptance Criteria                                                                                                                             |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| **M‑01** | *As a Pro freelancer*, I want a **Quick Estimate** button on any Upwork job page **so that** I can price proposals in one click.                                                                              | Button appears only when JWT tier === "pro" and URL matches `https://www.upwork.com/jobs/*`; click triggers estimate flow in ≤ 500 ms.          |
+| **M‑02** | *As a Pro freelancer*, I want my **personal hourly rate** auto‑applied to every estimate **so that** quotes reflect my pricing.                                                                               | Given `user.hourlyRate = 90`, totalCost = 90 × devDays; cost field rounded to nearest whole dollar.                                             |
+| **M‑03** | *As a Pro freelancer*, I want to **generate a downloadable SOW** immediately after an estimate **so that** I can attach it to proposals.                                                                      | From modal, pressing *Generate SOW* returns PDF link ≤ 15 s; file opens in new tab; Mixpanel event `sow_generated` fires with `estimateId`.     |
+| **C‑01** | *As a Pro freelancer*, I want a **(Optional)** live Upwork job feed injected as a right‑hand sidebar inside the Upwork website **so that** I can spot high‑match jobs without leaving the job‑search context. | Sidebar (optional) is content‑script injected on `upwork.com` pages and displays jobs from saved RSS feeds; feature gated behind a future flag. |
+| **M‑05** | *As a Starter‑tier user*, I want a **clear upsell prompt** when I try Pro‑only features **so that** I understand the value of upgrading.                                                                      | If JWT tier === "starter" and Quick Estimate clicked → modal displays Pro benefits and deep‑link to billing; Mixpanel `upsell_shown` logged.    |
+| **S‑06** | *As any paid user*, I want to **edit my hourly rate** in extension settings **so that** I can update pricing on the fly.                                                                                      | Numeric input 10‑500 validated client‑side; PATCH `/api/v1/user/rate` 200 OK; new rate reflected in next estimate.                              |
+
+(Full MoSCoW feature breakdown continues in §4.)
+
+### 4. 📋 Detailed Feature List (MoSCoW)
+
+| Priority                                 | Feature                                                           | Acceptance Criteria                                                                                                                     |
+| ---------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Must**                                 | Paid‑tier gating (Pro only) in extension                          | If JWT tier ≠ "pro" → show upsell banner & disable Quick Estimate; **Upgrade button opens the Projectmaven billing page in a new tab.** |
+|                                          | Hourly‑rate retrieval & calculation                               | GET `/api/v1/user/profile` returns `hourlyRate`; totalCost = devDays × hourlyRate.                                                      |
+|                                          | Rate edit UI in extension popup                                   | PATCH request succeeds; new rate used on next estimate call.                                                                            |
+|                                          | Quick Estimate button, scraping, modal, SOW generation, telemetry | As previously defined                                                                                                                   |
+| **Should**                               | Starter‑tier upgrade nudges in dashboard                          | Dashboard shows CTA when scopes‑remaining = 0.                                                                                          |
+| **Could**                                | Upwork RSS ingest & sidebar job feed                              | Serverless Lambda + sidebar feed; jobs sorted by projected value.                                                                       |
+|                                          | A/B test different upsell copy for Pro trial                      | Mixpanel event‑based experiment.                                                                                                        |
+| Starter‑tier upgrade nudges in dashboard | Dashboard shows CTA when scopes‑remaining = 0.                    |                                                                                                                                         |
+| **Could**                                | A/B test different upsell copy for Pro trial                      | Mixpanel event‑based experiment.                                                                                                        |
+
+### 5. 🔌 External Dependencies & APIs
+
+| Service                                 | Link                 | Auth       | Notes                             |
+| --------------------------------------- | -------------------- | ---------- | --------------------------------- |
+| **Upwork Job Page (DOM)**               | upwork.com           | NA         | Primary data source for MVP       |
+| **Upwork RSS Feeds**                    | upwork.com RSS       | None       | Polled by Lambda (15‑min default) |
+| **Upwork Partner GraphQL API** (future) | Docs                 | OAuth 2.0  | Requires Upwork approval          |
+| **Projectmaven API**                    | projectmaven.io      | JWT        | Cost‑estimate, SOW, profile rate  |
+| **Chrome Web Store**                    | developer.chrome.com | Google     | Publishing                        |
+| **Mixpanel**                            | mixpanel.com         | Secret key | Telemetry (≤ 1 M events/yr free)  |
+| **AWS Lambda + DynamoDB**               | aws.amazon.com       | IAM        | RSS ingest microservice           |
+
+### 6. 🗺️ High‑Level Architecture & Tech Stack
+
+```
+[Chrome Extension (TS)]
+  ├── content‑script.js  → scrapes DOM, injects sidebar & button
+  ├── service‑worker.js  → handles JWT refresh, background fetch
+  └── popup.html         → settings & login (hourly‑rate field)
+
+[Projectmaven Backend (Node.js/Express, PostgreSQL)]
+  ├── /project/* routes  (cost‑estimate, SOW)
+  ├── /user/profile      (GET/PATCH hourlyRate)
+  └── Auth service (JWT, Google OAuth)
+
+[AWS Lambda (RSS Ingest)] → DynamoDB (feed cache)
+       ↑ CloudWatch events (15‑min cron)
+```
+
+*Security:* HTTPS; JWT expiry 30 min; CSP restricts `connect‑src` to `projectmaven.io` & telemetry domains.
+*Compliance:* GDPR/CCPA; first‑run consent; “Not affiliated with Upwork” footer.
+
+### 7. ⏱️ Effort Estimates & Non‑Labor Costs
+
+#### 7.1 Effort (Story Points → Days)
+
+| Epic                                 | SP     | Days   |
+| ------------------------------------ | ------ | ------ |
+| E1 Extension foundation              | 8      | 8      |
+| E2 Auth & JWT                        | 5      | 5      |
+| E3 DOM scraping                      | 6      | 6      |
+| E4 Estimate modal                    | 7      | 7      |
+| E5 SOW flow                          | 5      | 5      |
+| E6 RSS ingest & sidebar \*(Could) \* | 8      | 8      |
+| E7 Telemetry & compliance            | 4      | 4      |
+| E8 CI/CD & publishing                | 4      | 4      |
+| E9 QA & regression                   | 4      | 4      |
+| **E10 Tier gating & rate settings**  | 6      | 6      |
+| **Buffer (10 %)**                    | 4      | 4      |
+| **Total**                            | **61** | **61** |
+
+#### 7.2 Non‑Labor Cost Baseline (Year 1)
+
+| Item                                   | Type      | Cost                    |
+| -------------------------------------- | --------- | ----------------------- |
+| Chrome Web Store dev account           | One‑time  | **US \$5**              |
+| Mixpanel Start‑up plan (≤ 1 M events)  | Recurring | **US \$0** first year   |
+| AWS Lambda + DynamoDB (RSS ingest)     | Recurring | **≈ US \$25 / month**   |
+| Upwork Partner API compliance (future) | One‑time  | **\$0** (approval only) |
+
+*All development labor is performed in‑house on Cursor, so no external labor cost is budgeted.*
+
+### 8. 📆 Timeline & Milestones
+
+| Sprint          | Dates              | Deliverables                                                     |
+| --------------- | ------------------ | ---------------------------------------------------------------- |
+| 0               | 2025‑07‑07 → 07‑18 | Boilerplate, accounts, wire‑frames                               |
+| 1               | 2025‑07‑21 → 08‑06 | Auth, scraping, estimate modal demo, tier gating, rate settings  |
+| 2               | 2025‑08‑07 → 08‑20 | SOW PDF, telemetry (RSS sidebar deferred)                        |
+| 3               | 2025‑08‑21 → 09‑03 | Compliance polish, CI/CD, regression; submit to Chrome Web Store |
+| **Public Beta** | 2025‑09‑08         | Extension live on Web Store; announcement                        |
+
+### 9. 👫 Team & Resource Plan
+
+| Role                       | FTE  | Responsibilities                   |
+| -------------------------- | ---- | ---------------------------------- |
+| Front‑end Dev (You / team) | 1.0  | Extension TS, UX, Playwright tests |
+| Back‑end Dev (You / team)  | 1.0  | Node.js APIs, Lambda, CI/CD        |
+| Product Owner (You)        | 0.2  | Backlog, reviews, store listing    |
+| External Legal (on‑call)   | 0.05 | ToS & privacy review               |
+
+### 10. ⚠️ Risks & Mitigations
+
+| #        | Risk                                                               | Category              | Probability | Impact | Risk Score\* | Mitigation / Contingency                                                                                                                         | Owner                        |
+| -------- | ------------------------------------------------------------------ | --------------------- | ----------- | ------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------- |
+| **R‑1**  | Upwork changes HTML/CSS selectors, breaking DOM scraping.          | Technical / External  | Medium      | High   | **12**       | • Abstract selectors in `selectors.ts` with Jest fixtures.<br>• Add XPath fallbacks.<br>• Monitor Mixpanel "scrape‑fail"; hot‑patch within 24 h. | Front‑end Dev                |
+| **R‑2**  | Upwork flags the extension for policy violation or blocks traffic. | Compliance / Business | Medium      | High   | **12**       | • Minimal DOM injection.<br>• Disclaimer shown.<br>• Poll RSS ≤1 req/min.<br>• Initiate Partner‑API process (Phase 2).                           | Product Owner & Back‑end Dev |
+| **R‑3**  | Chrome Web Store review delays or rejection.                       | Schedule              | Low         | High   | **10**       | • Submit to trusted‑tester channel early.<br>• Restrict permissions.<br>• Provide detailed privacy policy.                                       | Front‑end Dev                |
+| **R‑4**  | JWT refresh fails, causing silent 401s and user churn.             | Technical             | Medium      | Medium | **9**        | • Refresh 5 min before expiry.<br>• Re‑login toast prompt.<br>• Sentry alert on 401 burst.                                                       | Back‑end Dev                 |
+| **R‑5**  | Serverless RSS ingest exceeds AWS free‑tier due to rapid polling.  | Cost / Ops            | Medium      | Medium | **9**        | • Default poll interval 15 min.<br>• Dynamic back‑off if no new jobs.<br>• AWS Budget alert at \$50/mo.                                          | Back‑end Dev                 |
+| **R‑6**  | Low extension adoption → insufficient Pro conversions.             | Product / Market      | Medium      | Medium | **9**        | • Offer 20 free estimates during 14‑day trial.<br>• Track funnel metrics.<br>• In‑app nurture emails.                                            | Product Owner                |
+| **R‑7**  | Two‑person team hit by illness during critical path.               | Schedule / Resourcing | Low         | Medium | **6**        | • Shared knowledge base.<br>• 10 % buffer already budgeted.<br>• Contract backup dev on 48 h retainer.                                           | Product Owner                |
+| **R‑8**  | SOW PDF generation >15 s, causing user drop‑off.                   | Performance / UX      | Low         | Medium | **6**        | • Progress skeleton loader.<br>• Pre‑warm Lambda.<br>• Async generate with email fallback if >15 s.                                              | Back‑end Dev                 |
+| **R‑9**  | Mixpanel or Sentry SDK blocked by CSP.                             | Technical             | Low         | Medium | **6**        | • CSP‑safe injection via `chrome.runtime.getURL`.<br>• Fallback REST beacon.                                                                     | Front‑end Dev                |
+| **R‑10** | Legal exposure from transferring job‑post data without consent.    | Legal / Compliance    | Low         | High   | **10**       | • First‑run consent modal.<br>• Privacy policy linked.<br>• Auto‑delete payload logs after 7 days.                                               | Product Owner & Legal        |
+
+*Risk Score = Probability (Low = 1, Medium = 2, High = 3) × Impact (Low = 2, Medium = 3, High = 4).*
+
+### 11. ✅ Definition of Done & Acceptance
+
+* **All Must‑Have stories** in §4 meet acceptance criteria and pass Playwright tests.
+* End‑to‑end flow (estimate + SOW) completes **≤ 15 s** on a simulated 3G network.
+* No P1/P2 Sentry errors during the last 72 h of Sprint 3.
+* Chrome Web Store listing approved and publicly searchable.
+* Mixpanel dashboard shows install, estimate, and SOW events.
+* “Not affiliated with Upwork” disclaimer visible in all extension UIs.
+* Stakeholder sign‑off in demo.
+
+### 12. 📄 Appendices
+
+* **A. Research sources** — PouncerAI site; Upwork Partner API docs; Chrome Web Store fee; Mixpanel pricing; Upwork extension guidelines.
+* **B. API reference snippets** — see `server/src/routes/v1/project.route.ts` in repo.
+* **C. Glossary** — DAU (Daily Active Users), JWT (JSON Web Token), MV3 (Manifest Version 3), RSS (Really Simple Syndication), SOW (Statement of Work).
+
+---
+
+*End of Document*

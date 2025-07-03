@@ -1,0 +1,11 @@
+{
+	"mcpServers": {
+	  "task-master-ai": {
+		"command": "npx",
+		"args": ["-y", "--package=task-master-ai", "task-master-ai"],
+		"env": {
+		  "OPENAI_API_KEY": "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"
+		}
+	  }
+	}
+  }
